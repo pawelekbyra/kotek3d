@@ -17,14 +17,21 @@ function Ground() {
 function Player() {
   const group = useRef<THREE.Group>(null!);
   const { scene, animations } = useGLTF('/RobotExpressive.glb');
-  const { actions } = useAnimations(animations, group);
+  const { actions, names } = useAnimations(animations, group);
   const { camera } = useThree();
+
+  // Log animations to see what's available
+  useEffect(() => {
+    console.log("Available animations:", names);
+  }, [names]);
 
   const [movement, setMovement] = useState({
     forward: false,
     backward: false,
     left: false,
     right: false,
+    run: false,
+    jump: false,
   });
 
   const movementRef = useRef(movement);
@@ -51,6 +58,12 @@ function Player() {
         case 'arrowright':
           setMovement((m) => ({ ...m, right: true }));
           break;
+        case 'shift':
+          setMovement((m) => ({ ...m, run: true }));
+          break;
+        case ' ':
+          setMovement((m) => ({ ...m, jump: true }));
+          break;
       }
     };
 
@@ -72,6 +85,12 @@ function Player() {
         case 'arrowright':
           setMovement((m) => ({ ...m, right: false }));
           break;
+        case 'shift':
+          setMovement((m) => ({ ...m, run: false }));
+          break;
+        case ' ':
+          setMovement((m) => ({ ...m, jump: false }));
+          break;
       }
     };
 
@@ -84,11 +103,19 @@ function Player() {
   }, []);
 
   const [currentAction, setCurrentAction] = useState('Idle');
+  const jumpVelocity = useRef(0);
+  const isJumping = useRef(false);
 
   useEffect(() => {
     if (!actions) return;
     const isMoving = movement.forward || movement.backward || movement.left || movement.right;
-    const action = isMoving ? 'Walking' : 'Idle';
+
+    let action = 'Idle';
+    if (isJumping.current) {
+        action = 'Jump';
+    } else if (isMoving) {
+        action = movement.run ? 'Running' : 'Walking';
+    }
 
     if (currentAction !== action) {
       const nextAction = actions[action];
@@ -99,6 +126,11 @@ function Player() {
       }
       if (nextAction) {
         nextAction.reset().fadeIn(0.2).play();
+        if (action === 'Jump') {
+            // Jump animation logic might need to be clamped or handled specially if it's not a loop
+            nextAction.setLoop(THREE.LoopOnce, 1);
+            nextAction.clampWhenFinished = true;
+        }
       }
       setCurrentAction(action);
     }
@@ -107,9 +139,11 @@ function Player() {
   useFrame((state, delta) => {
     if (!group.current) return;
 
-    const moveSpeed = 5 * delta;
+    const baseSpeed = movementRef.current.run ? 10 : 5;
+    const moveSpeed = baseSpeed * delta;
     const rotateSpeed = 3 * delta;
 
+    // Movement logic
     if (movementRef.current.forward) {
       group.current.translateZ(moveSpeed);
     }
@@ -121,6 +155,23 @@ function Player() {
     }
     if (movementRef.current.right) {
       group.current.rotation.y -= rotateSpeed;
+    }
+
+    // Jump physics (simple)
+    if (movementRef.current.jump && !isJumping.current) {
+        isJumping.current = true;
+        jumpVelocity.current = 10;
+    }
+
+    if (isJumping.current) {
+        group.current.position.y += jumpVelocity.current * delta;
+        jumpVelocity.current -= 25 * delta; // Gravity
+
+        if (group.current.position.y <= 0) {
+            group.current.position.y = 0;
+            isJumping.current = false;
+            jumpVelocity.current = 0;
+        }
     }
 
     // Third person camera follow
@@ -145,6 +196,8 @@ function Player() {
 useGLTF.preload('/RobotExpressive.glb');
 
 export default function Game() {
+  const [showHelp, setShowHelp] = useState(true);
+
   return (
     <div style={{ width: '100vw', height: '100vh', background: '#101010' }}>
       <Canvas shadows camera={{ position: [0, 5, 10], fov: 50 }}>
@@ -168,8 +221,12 @@ export default function Game() {
         </Suspense>
       </Canvas>
       <div style={{ position: 'absolute', top: 20, left: 20, color: 'white', pointerEvents: 'none', zIndex: 10 }}>
-        <h1 className="text-2xl font-bold">3D Game</h1>
-        <p>Użyj WASD lub strzałek do poruszania się</p>
+        <h1 className="text-3xl font-black italic tracking-tighter">POLUTEK 3D</h1>
+        <div className="mt-4 space-y-1 bg-black/20 p-4 rounded-xl backdrop-blur-sm border border-white/10">
+            <p>⌨️ <span className="font-bold">WASD / Strzałki</span>: Ruch</p>
+            <p>🏃 <span className="font-bold">Shift</span>: Bieg</p>
+            <p>🚀 <span className="font-bold">Spacja</span>: Skok</p>
+        </div>
       </div>
     </div>
   );
