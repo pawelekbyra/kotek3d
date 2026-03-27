@@ -3,7 +3,7 @@ import time
 
 def verify_game(page):
     # Navigate to the game
-    page.goto("http://localhost:3000")
+    page.goto("http://localhost:3001")
 
     # Wait for the Canvas
     page.wait_for_selector("canvas", timeout=10000)
