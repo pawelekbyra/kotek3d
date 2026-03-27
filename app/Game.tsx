@@ -1,8 +1,8 @@
 'use client';
 
 import React, { Suspense, useState, useEffect, useRef, useMemo } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Sky, ContactShadows, Environment, useGLTF, useAnimations, Float, Text } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Sky, ContactShadows, Environment, useGLTF, useAnimations, Float } from '@react-three/drei';
 import * as THREE from 'three';
 
 // --- Level Components ---
@@ -13,6 +13,32 @@ function Platform({ position, args = [5, 0.5, 5], color = "#404040" }: any) {
       <boxGeometry args={args} />
       <meshStandardMaterial color={color} roughness={0.5} />
     </mesh>
+  );
+}
+
+function Bird({ url, position, speed = 1, radius = 5, height = 2 }: any) {
+  const { scene, animations } = useGLTF(url) as any;
+  const { actions } = useAnimations(animations, scene);
+  const ref = useRef<THREE.Group>(null!);
+
+  useEffect(() => {
+    if (actions && actions[Object.keys(actions)[0]]) {
+      actions[Object.keys(actions)[0]]?.play();
+    }
+  }, [actions]);
+
+  useFrame((state) => {
+    const t = state.clock.getElapsedTime() * speed;
+    ref.current.position.x = position[0] + Math.cos(t) * radius;
+    ref.current.position.z = position[2] + Math.sin(t) * radius;
+    ref.current.position.y = position[1] + Math.sin(t * 0.5) * height;
+    ref.current.rotation.y = -t + Math.PI / 2;
+  });
+
+  return (
+    <group ref={ref} scale={0.01}>
+      <primitive object={scene} />
+    </group>
   );
 }
 
@@ -160,13 +186,13 @@ function Player({ onCollect, onReset, platforms, collectibles }: any) {
     group.current.position.x += moveDirection.x * delta;
     group.current.position.z += moveDirection.z * delta;
 
-    // Gravity & Jump
+    // Gravity & Jump - Buffed jump for better navigation
     if (movementRef.current.jump && isGrounded.current) {
-      velocity.current.y = 10;
+      velocity.current.y = 12; // Increased from 10
       isGrounded.current = false;
     }
 
-    velocity.current.y -= 25 * delta;
+    velocity.current.y -= 20 * delta; // Reduced gravity from 25 for floatier feel
     group.current.position.y += velocity.current.y * delta;
 
     // Collision detection (very simple)
@@ -240,20 +266,24 @@ export default function Game() {
   const [deaths, setDeaths] = useState(0);
 
   const platforms = useMemo(() => [
-    { position: [0, -0.25, 0], args: [10, 0.5, 10], color: "#333" },
-    { position: [0, -0.25, 10], args: [5, 0.5, 5], color: "#444" },
-    { position: [10, 0.25, 5], args: [5, 0.5, 5], color: "#555" },
-    { position: [-10, 0.75, 8], args: [5, 0.5, 5], color: "#444" },
-    { position: [5, 2.25, -5], args: [4, 0.5, 4], color: "#666" },
-    { position: [-5, 3.25, -10], args: [4, 0.5, 4], color: "#555" },
+    { position: [0, -0.25, 0], args: [12, 0.5, 12], color: "#333" }, // Enlarged base
+    { position: [0, -0.25, 10], args: [6, 0.5, 6], color: "#444" },
+    { position: [12, 1, 8], args: [6, 0.5, 6], color: "#555" }, // Adjusted height and distance
+    { position: [-12, 1.5, 10], args: [6, 0.5, 6], color: "#444" },
+    { position: [8, 3.5, -5], args: [5, 0.5, 5], color: "#666" },
+    { position: [-8, 5, -12], args: [5, 0.5, 5], color: "#555" },
+    { position: [0, 7, -18], args: [4, 0.5, 4], color: "#444" }, // Added more verticality
+    { position: [10, 9, -20], args: [4, 0.5, 4], color: "#333" },
   ], []);
 
   const [collectibleStates, setCollectibleStates] = useState([
     { id: 1, position: [0, 1, 10], collected: false },
-    { id: 2, position: [10, 1.5, 5], collected: false },
-    { id: 3, position: [-10, 2, 8], collected: false },
-    { id: 4, position: [5, 3.5, -5], collected: false },
-    { id: 5, position: [-5, 4.5, -10], collected: false },
+    { id: 2, position: [12, 2.5, 8], collected: false },
+    { id: 3, position: [-12, 3, 10], collected: false },
+    { id: 4, position: [8, 5, -5], collected: false },
+    { id: 5, position: [-8, 6.5, -12], collected: false },
+    { id: 6, position: [0, 8.5, -18], collected: false },
+    { id: 7, position: [10, 10.5, -20], collected: false },
   ]);
 
   const handleCollect = (id: number) => {
@@ -276,11 +306,15 @@ export default function Game() {
 
           <Lava />
 
+          <Bird url="/Flamingo.glb" position={[10, 5, 0]} speed={0.5} radius={15} height={5} />
+          <Bird url="/Parrot.glb" position={[-15, 8, 5]} speed={0.8} radius={10} height={3} />
+          <Bird url="/Stork.glb" position={[0, 12, -10]} speed={0.3} radius={20} height={10} />
+
           {collectibleStates.map(c => (
             <Collectible key={c.id} position={c.position} isCollected={c.collected} />
           ))}
 
-          <ContactShadows resolution={1024} scale={20} blur={2} opacity={0.35} far={10} color="#000000" />
+          <ContactShadows resolution={1024} scale={50} blur={2} opacity={0.35} far={20} color="#000000" />
           <Environment preset="city" />
 
           <Player
@@ -316,7 +350,7 @@ export default function Game() {
         </div>
       </div>
 
-      {score >= 500 && (
+      {score >= 700 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-12 rounded-[3rem] text-center animate-bounce">
                   <h2 className="text-7xl font-black text-white mb-2">WYGRANA! 🏆</h2>
