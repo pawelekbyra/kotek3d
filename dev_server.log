@@ -1,18 +1,12 @@
 
 > polutek@0.1.0 dev
-> next dev
+> next dev -p 3000
 
   ▲ Next.js 14.2.35
   - Local:        http://localhost:3000
 
  ✓ Starting...
- ✓ Ready in 1938ms
+ ✓ Ready in 2.6s
  ○ Compiling / ...
- ✓ Compiled / in 4.1s (455 modules)
- GET / 200 in 4447ms
-
-warn - The `content` option in your Tailwind CSS configuration is missing or empty.
-warn - Configure your content sources or your generated CSS will be missing styles.
-warn - https://tailwindcss.com/docs/content-configuration
- ✓ Compiled in 371ms (234 modules)
- ✓ Compiled in 247ms (234 modules)
+ ✓ Compiled / in 10.1s (1630 modules)
+ GET / 200 in 10445ms
