@@ -2,17 +2,62 @@
 
 import React, { Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Sky, ContactShadows, Environment, useGLTF, useAnimations, Float } from '@react-three/drei';
+import { Sky, ContactShadows, Environment, useGLTF, useAnimations, Float, Instances, Instance } from '@react-three/drei';
 import * as THREE from 'three';
 
 // --- Level Components ---
 
-function Platform({ position, args = [5, 0.5, 5], color = "#404040" }: any) {
+function Meadow() {
   return (
-    <mesh position={position} receiveShadow castShadow>
-      <boxGeometry args={args} />
-      <meshStandardMaterial color={color} roughness={0.5} />
+    <mesh rotation-x={-Math.PI / 2} position={[0, -0.01, 0]} receiveShadow>
+      <planeGeometry args={[500, 500]} />
+      <meshStandardMaterial color="#4d8c3f" roughness={0.8} />
     </mesh>
+  );
+}
+
+function StylizedTree({ position, scale = 1 }: any) {
+  return (
+    <group position={position} scale={scale}>
+      {/* Trunk */}
+      <mesh position={[0, 1, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.2, 0.3, 2, 8]} />
+        <meshStandardMaterial color="#5d4037" />
+      </mesh>
+      {/* Leaves */}
+      <mesh position={[0, 2.5, 0]} castShadow receiveShadow>
+        <coneGeometry args={[1, 2, 8]} />
+        <meshStandardMaterial color="#2e7d32" />
+      </mesh>
+      <mesh position={[0, 3.5, 0]} castShadow receiveShadow>
+        <coneGeometry args={[0.8, 1.5, 8]} />
+        <meshStandardMaterial color="#388e3c" />
+      </mesh>
+    </group>
+  );
+}
+
+function Flowers({ data }: { data: { id: number, position: [number, number, number] }[] }) {
+  const { scene } = useGLTF('/Flower.glb') as any;
+
+  // Extract the geometry and material from the GLTF
+  // Usually flowers are simple groups, we try to find the first mesh
+  const flowerMesh = useMemo(() => {
+    let mesh: any = null;
+    scene.traverse((obj: any) => {
+      if (obj.isMesh && !mesh) mesh = obj;
+    });
+    return mesh;
+  }, [scene]);
+
+  if (!flowerMesh) return null;
+
+  return (
+    <Instances range={data.length} geometry={flowerMesh.geometry} material={flowerMesh.material}>
+      {data.map((f) => (
+        <Instance key={f.id} position={f.position} scale={0.5} />
+      ))}
+    </Instances>
   );
 }
 
@@ -39,15 +84,6 @@ function Bird({ url, position, speed = 1, radius = 5, height = 2 }: any) {
     <group ref={ref} scale={0.01}>
       <primitive object={scene} />
     </group>
-  );
-}
-
-function Lava() {
-  return (
-    <mesh rotation-x={-Math.PI / 2} position={[0, -2, 0]}>
-      <planeGeometry args={[200, 200]} />
-      <meshStandardMaterial color="#ff4400" emissive="#ff0000" emissiveIntensity={2} />
-    </mesh>
   );
 }
 
@@ -192,41 +228,15 @@ function Player({ onCollect, onReset, platforms, collectibles }: any) {
       isGrounded.current = false;
     }
 
-    velocity.current.y -= 20 * delta; // Reduced gravity from 25 for floatier feel
+    velocity.current.y -= 30 * delta;
     group.current.position.y += velocity.current.y * delta;
 
-    // Collision detection (very simple)
-    let grounded = false;
-    platforms.forEach((p: any) => {
-      const [px, py, pz] = p.position;
-      const [pw, ph, pd] = p.args;
-
-      const halfW = pw / 2;
-      const halfH = ph / 2;
-      const halfD = pd / 2;
-
-      // Check if within X and Z bounds
-      if (
-        group.current.position.x >= px - halfW &&
-        group.current.position.x <= px + halfW &&
-        group.current.position.z >= pz - halfD &&
-        group.current.position.z <= pz + halfD
-      ) {
-        // Check if hitting from top
-        const platformTop = py + halfH;
-        if (
-          group.current.position.y <= platformTop &&
-          group.current.position.y >= py - halfH &&
-          velocity.current.y <= 0
-        ) {
-          group.current.position.y = platformTop;
-          velocity.current.y = 0;
-          grounded = true;
-        }
-      }
-    });
-
-    isGrounded.current = grounded;
+    // Ground collision
+    if (group.current.position.y <= 0) {
+      group.current.position.y = 0;
+      velocity.current.y = 0;
+      isGrounded.current = true;
+    }
 
     // Proximity Collectibles
     collectibles.forEach((c: any) => {
@@ -238,13 +248,9 @@ function Player({ onCollect, onReset, platforms, collectibles }: any) {
       }
     });
 
-    // Reset if fallen
-    if (group.current.position.y < -5) {
-        group.current.position.set(0, 5, 0); // Spawn a bit higher
-        group.current.rotation.set(0, Math.PI, 0);
-        velocity.current.set(0, 0, 0);
-        onReset();
-    }
+    // Boundaries (keep player in the meadow)
+    if (Math.abs(group.current.position.x) > 250) group.current.position.x = Math.sign(group.current.position.x) * 250;
+    if (Math.abs(group.current.position.z) > 250) group.current.position.z = Math.sign(group.current.position.z) * 250;
 
     const relativeCameraOffset = new THREE.Vector3(0, 5, -10);
     const cameraOffset = relativeCameraOffset.applyMatrix4(group.current.matrixWorld);
@@ -263,28 +269,38 @@ function Player({ onCollect, onReset, platforms, collectibles }: any) {
 
 export default function Game() {
   const [score, setScore] = useState(0);
-  const [deaths, setDeaths] = useState(0);
 
-  const platforms = useMemo(() => [
-    { position: [0, -0.25, 0], args: [12, 0.5, 12], color: "#333" }, // Enlarged base
-    { position: [0, -0.25, 10], args: [6, 0.5, 6], color: "#444" },
-    { position: [12, 1, 8], args: [6, 0.5, 6], color: "#555" }, // Adjusted height and distance
-    { position: [-12, 1.5, 10], args: [6, 0.5, 6], color: "#444" },
-    { position: [8, 3.5, -5], args: [5, 0.5, 5], color: "#666" },
-    { position: [-8, 5, -12], args: [5, 0.5, 5], color: "#555" },
-    { position: [0, 7, -18], args: [4, 0.5, 4], color: "#444" }, // Added more verticality
-    { position: [10, 9, -20], args: [4, 0.5, 4], color: "#333" },
-  ], []);
+  // Deterministic random positions for trees and flowers
+  const envObjects = useMemo(() => {
+    const trees = [];
+    const flowers = [];
+    for (let i = 0; i < 150; i++) {
+        trees.push({
+            id: i,
+            position: [(Math.random() - 0.5) * 450, 0, (Math.random() - 0.5) * 450] as [number, number, number],
+            scale: 0.8 + Math.random() * 0.5
+        });
+    }
+    for (let i = 0; i < 500; i++) {
+        flowers.push({
+            id: i,
+            position: [(Math.random() - 0.5) * 450, 0, (Math.random() - 0.5) * 450] as [number, number, number]
+        });
+    }
+    return { trees, flowers };
+  }, []);
 
-  const [collectibleStates, setCollectibleStates] = useState([
-    { id: 1, position: [0, 1, 10], collected: false },
-    { id: 2, position: [12, 2.5, 8], collected: false },
-    { id: 3, position: [-12, 3, 10], collected: false },
-    { id: 4, position: [8, 5, -5], collected: false },
-    { id: 5, position: [-8, 6.5, -12], collected: false },
-    { id: 6, position: [0, 8.5, -18], collected: false },
-    { id: 7, position: [10, 10.5, -20], collected: false },
-  ]);
+  const [collectibleStates, setCollectibleStates] = useState(() => {
+    const items = [];
+    for (let i = 0; i < 20; i++) {
+        items.push({
+            id: i,
+            position: [(Math.random() - 0.5) * 400, 1, (Math.random() - 0.5) * 400] as [number, number, number],
+            collected: false
+        });
+    }
+    return items;
+  });
 
   const handleCollect = (id: number) => {
     setCollectibleStates(prev => prev.map(c => c.id === id ? { ...c, collected: true } : c));
@@ -292,36 +308,37 @@ export default function Game() {
   };
 
   return (
-    <div className="w-screen h-screen bg-[#101010] relative">
+    <div className="w-screen h-screen bg-[#87CEEB] relative">
       <Canvas shadows camera={{ position: [0, 5, 10], fov: 50 }}>
         <Suspense fallback={null}>
-          <Sky sunPosition={[100, 20, 100]} />
-          <ambientLight intensity={0.5} />
-          <pointLight position={[10, 10, 10]} intensity={1} castShadow />
-          <directionalLight position={[-10, 20, 10]} intensity={1.5} castShadow />
+          <Sky sunPosition={[100, 40, 100]} turbidity={0.1} rayleigh={0.5} />
+          <ambientLight intensity={0.7} />
+          <directionalLight position={[50, 100, 50]} intensity={1.5} castShadow shadow-mapSize={[2048, 2048]} />
 
-          {platforms.map((p, i) => (
-            <Platform key={i} position={p.position} args={p.args} color={p.color} />
+          <Meadow />
+
+          {envObjects.trees.map(t => (
+            <StylizedTree key={`tree-${t.id}`} position={t.position} scale={t.scale} />
           ))}
 
-          <Lava />
+          <Flowers data={envObjects.flowers} />
 
-          <Bird url="/Flamingo.glb" position={[10, 5, 0]} speed={0.5} radius={15} height={5} />
-          <Bird url="/Parrot.glb" position={[-15, 8, 5]} speed={0.8} radius={10} height={3} />
-          <Bird url="/Stork.glb" position={[0, 12, -10]} speed={0.3} radius={20} height={10} />
+          <Bird url="/Flamingo.glb" position={[20, 10, 0]} speed={0.4} radius={30} height={10} />
+          <Bird url="/Parrot.glb" position={[-30, 15, 20]} speed={0.6} radius={25} height={8} />
+          <Bird url="/Stork.glb" position={[10, 20, -30]} speed={0.2} radius={40} height={15} />
 
           {collectibleStates.map(c => (
             <Collectible key={c.id} position={c.position} isCollected={c.collected} />
           ))}
 
-          <ContactShadows resolution={1024} scale={50} blur={2} opacity={0.35} far={20} color="#000000" />
-          <Environment preset="city" />
+          <ContactShadows resolution={1024} scale={200} blur={1} opacity={0.25} far={50} color="#000000" />
+          <Environment preset="park" />
 
           <Player
-            platforms={platforms}
+            platforms={[]}
             collectibles={collectibleStates}
             onCollect={handleCollect}
-            onReset={() => setDeaths(d => d + 1)}
+            onReset={() => {}}
           />
         </Suspense>
       </Canvas>
@@ -340,21 +357,18 @@ export default function Game() {
         </div>
 
         <div className="flex flex-col items-end gap-4">
-            <div className="bg-blue-600/80 backdrop-blur-md border border-white/20 px-8 py-4 rounded-2xl shadow-2xl">
-                <p className="text-xs uppercase tracking-widest text-blue-100 font-bold">Wynik</p>
+            <div className="bg-green-600/80 backdrop-blur-md border border-white/20 px-8 py-4 rounded-2xl shadow-2xl">
+                <p className="text-xs uppercase tracking-widest text-green-100 font-bold">Wynik</p>
                 <p className="text-5xl font-black text-white tabular-nums">{score.toLocaleString()}</p>
-            </div>
-            <div className="bg-red-600/80 backdrop-blur-md border border-white/20 px-6 py-2 rounded-xl shadow-xl">
-                <p className="text-xs uppercase tracking-widest text-red-100 font-bold">Skuchy: {deaths}</p>
             </div>
         </div>
       </div>
 
-      {score >= 700 && (
+      {score >= 2000 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="bg-white/10 backdrop-blur-xl border border-white/20 p-12 rounded-[3rem] text-center animate-bounce">
                   <h2 className="text-7xl font-black text-white mb-2">WYGRANA! 🏆</h2>
-                  <p className="text-xl text-white/60">Zebrałeś wszystkie toroidy!</p>
+                  <p className="text-xl text-white/60">Zebrałeś wszystkie toroidy na łące!</p>
               </div>
           </div>
       )}
