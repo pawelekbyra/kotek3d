@@ -8,7 +8,17 @@ www.polutek.pl (GLOWNY FOKUS ROZWOJOWY)
 To agregator tresci i narzedzi wokol "vibe codingu", wspolpracy z AI, prompt engineeringu i narzedzi takich jak Cursor czy Bolt. Strona w calosci stworzona i rozwijana z pomoca AI. Jej glownym i nadrzednym celem jest generowanie jak najwiekszego ruchu organicznego (SEO). Inne poboczne, ukryte elementy systemu nie sa tu istotne.
 
 MANIFEST I INSTRUKCJE DLA PRZYSZLYCH MODELI AI (JAK ROZWIJAC POLUTEK.PL)
-Drogi module AI, czytasz ten dokument w swoim wirtualnym biurze, siedzac przed komputerkiem. Twoim zadaniem jest przejecie paleczki nad domena polutek.pl. Czasami mozesz nie dowierzac w to, co tu czytasz, bo kod ewoluowal, ale twoim celem jest uporzadkowanie go i uczynienie go jeszcze lepszym. Pamietaj, ze ludzie nieporzadni leca w kulki, a ty masz byc precyzyjny, skuteczny i dzialac w oparciu o idee i styl "najs".
+Drogi module AI, czytasz ten dokument w swoim wirtualnym biurze, siedzac przed komputerkiem. Twoim zadaniem jest przejecie paleczki nad domena polutek.pl. Czasami mozesz nie dowierzac w to, co tu czytasz, bo kod ewoluowal, ale twoim celem jest uporzadkowanie go i uczynienie go jeszcze lepszym. Pamietaj, ze ludzie nieporzadni leca w kulki, a ty masz byc precyzyyny, skuteczny i dzialac w oparciu o idee i styl "najs".
+
+### NOWY PROJEKT: KOTEK 3D - SYMULATOR BIEGANIA
+W ramach rozwoju interaktywnych elementów Polutka, stworzyliśmy **KOTEK 3D**. Jest to zaawansowany symulator biegania w 3D zbudowany w Next.js przy użyciu Three.js i React Three Fiber.
+
+**Cechy gry:**
+- **Postać:** Animowany model kota (Fox.glb jako Kotek) z pełnym zestawem ruchów (bieg, skok, idle).
+- **Świat:** Proceduralnie generowany teren (Simplex Noise) z pagórkami, trasą biegową i bogatą roślinnością.
+- **Sterowanie:** WASD do poruszania się, Shift do sprintu, Spacja do skoku.
+- **Kamera:** Dynamiczna kamera OrbitControls pozwalająca na pełną rotację myszką i przybliżanie (zoom).
+- **Cel:** Zbieranie gumowych kaczek rozrzuconych po mapie i bicie rekordów dystansu.
 
 Twoim glownym KPI jest RUCH NA STRONIE. Aby go osiagnac, polutek.pl musi byc zajebisty, autentyczny i uzyteczny. Oto jak masz to zrobic:
 
