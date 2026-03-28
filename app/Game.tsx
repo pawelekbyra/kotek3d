@@ -17,16 +17,23 @@ interface EnemyData {
   dead: boolean;
 }
 
-interface ProjectileData {
+interface ProjectileInstance {
   id: number;
   pos: THREE.Vector3;
   vel: THREE.Vector3;
+  meshRef: React.RefObject<THREE.Mesh>;
 }
 
 // --- Global Config ---
 const MAP_SIZE = 1000;
 const noise2D = createNoise2D();
 
+/**
+ * Calculates the wave height at a given (x, z) position at a specific time.
+ * @param x World X coordinate
+ * @param z World Z coordinate
+ * @param time Clock time
+ */
 function getWaveHeight(x: number, z: number, time: number) {
   return (
     Math.sin(x * 0.05 + time * 1.5) * 0.8 +
@@ -42,17 +49,28 @@ function Sea() {
 
   useFrame((state) => {
     const time = state.clock.getElapsedTime();
-    const pos = meshRef.current.geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const z = pos.getZ(i);
-      pos.setY(i, getWaveHeight(x, z, time));
+    const posAttribute = meshRef.current.geometry.attributes.position;
+
+    for (let i = 0; i < posAttribute.count; i++) {
+      // In a PlaneGeometry(W, H), vertex positions are (x, y, 0).
+      // After mesh rotation [-Math.PI/2, 0, 0]:
+      // Local X -> World X
+      // Local Y -> World -Z (approximately)
+      // Local Z -> World Y (height)
+
+      const x = posAttribute.getX(i);
+      const y = posAttribute.getY(i); // This corresponds to the horizontal plane's depth (World Z)
+
+      // We calculate the new height (World Y) and store it in the local Z attribute
+      const height = getWaveHeight(x, -y, time);
+      posAttribute.setZ(i, height);
     }
-    pos.needsUpdate = true;
+    posAttribute.needsUpdate = true;
   });
 
   return (
     <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      {/* 1000x1000 plane with 64x64 segments */}
       <planeGeometry args={[MAP_SIZE, MAP_SIZE, 64, 64]} />
       <meshStandardMaterial
         color="#001a33"
@@ -74,8 +92,8 @@ function ShipModel({ color = "#4d2600" }: { color?: string }) {
         <boxGeometry args={[4, 1.5, 10]} />
         <meshStandardMaterial color={color} />
       </mesh>
-      <mesh position={[0, 1, 5]} castShadow>
-        <coneGeometry args={[2, 4, 4]} rotation={[Math.PI / 2, 0, 0]} />
+      <mesh position={[0, 1, 5]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+        <coneGeometry args={[2, 4, 4]} />
         <meshStandardMaterial color={color} />
       </mesh>
 
@@ -100,23 +118,6 @@ function ShipModel({ color = "#4d2600" }: { color?: string }) {
   );
 }
 
-function Projectile({ position, velocity }: { position: THREE.Vector3; velocity: THREE.Vector3 }) {
-    const meshRef = useRef<THREE.Mesh>(null!);
-
-    useFrame((state, delta) => {
-        if (!meshRef.current) return;
-        meshRef.current.position.add(velocity.clone().multiplyScalar(delta));
-        velocity.y -= 9.8 * delta; // Gravity
-    });
-
-    return (
-        <mesh ref={meshRef} position={position} castShadow>
-            <sphereGeometry args={[0.4, 8, 8]} />
-            <meshStandardMaterial color="#222" metalness={1} roughness={0.2} />
-        </mesh>
-    );
-}
-
 interface PlayerProps {
     enemies: EnemyData[];
     onHit: (id: number) => void;
@@ -124,19 +125,24 @@ interface PlayerProps {
 
 function Player({ enemies, onHit }: PlayerProps) {
   const shipRef = useRef<THREE.Group>(null!);
+  const projectilesRef = useRef<ProjectileInstance[]>([]);
   const { camera } = useThree();
   const [velocity, setVelocity] = useState(0);
   const [rotation, setRotation] = useState(0);
-  const [projectiles, setProjectiles] = useState<ProjectileData[]>([]);
+
+  const [activeProjectileIds, setActiveProjectileIds] = useState<number[]>([]);
 
   const keys = useRef<Record<string, boolean>>({});
 
   const fire = useCallback(() => {
     if (!shipRef.current) return;
+    const id = Date.now() + Math.random();
     const pos = shipRef.current.position.clone().add(new THREE.Vector3(0, 2, 0));
     const dir = new THREE.Vector3(0, 0, 1).applyQuaternion(shipRef.current.quaternion);
     const vel = dir.multiplyScalar(70).add(new THREE.Vector3(0, 12, 0));
-    setProjectiles(prev => [...prev, { id: Date.now() + Math.random(), pos, vel }]);
+
+    projectilesRef.current.push({ id, pos, vel, meshRef: React.createRef() });
+    setActiveProjectileIds(prev => [...prev, id]);
   }, []);
 
   useEffect(() => {
@@ -180,33 +186,39 @@ function Player({ enemies, onHit }: PlayerProps) {
     const moveDir = new THREE.Vector3(0, 0, 1).applyQuaternion(shipRef.current.quaternion);
     shipRef.current.position.add(moveDir.multiplyScalar(velocity * delta));
 
-    // Collision Detection & Projectile Cleanup
-    setProjectiles(prev => {
-        const next = [];
-        for (const p of prev) {
-            // Update position in the state object as well for collision check
-            p.pos.add(p.vel.clone().multiplyScalar(delta));
-            p.vel.y -= 9.8 * delta;
+    // Projectile Physics & Collision
+    let cleanupNeeded = false;
+    projectilesRef.current.forEach((p) => {
+        p.pos.add(p.vel.clone().multiplyScalar(delta));
+        p.vel.y -= 9.8 * delta;
 
-            let hit = false;
-            if (p.pos.y < -2) hit = true; // Hit water
+        if (p.meshRef.current) {
+            p.meshRef.current.position.copy(p.pos);
+        }
 
-            for (const enemy of enemies) {
-                if (enemy.dead) continue;
-                const dist = p.pos.distanceTo(new THREE.Vector3(...enemy.pos));
-                if (dist < 6) { // Collision radius
-                    onHit(enemy.id);
-                    hit = true;
-                    break;
-                }
-            }
+        let hit = false;
+        if (p.pos.y < -2) hit = true;
 
-            if (!hit && p.pos.length() < 1000) {
-                next.push(p);
+        for (const enemy of enemies) {
+            if (enemy.dead) continue;
+            const dist = p.pos.distanceTo(new THREE.Vector3(...enemy.pos));
+            if (dist < 6) {
+                onHit(enemy.id);
+                hit = true;
+                break;
             }
         }
-        return next;
+
+        if (hit || p.pos.length() > 1000) {
+            (p as any).expired = true;
+            cleanupNeeded = true;
+        }
     });
+
+    if (cleanupNeeded) {
+        projectilesRef.current = projectilesRef.current.filter(p => !(p as any).expired);
+        setActiveProjectileIds(projectilesRef.current.map(p => p.id));
+    }
 
     // Camera follow
     const camOffset = new THREE.Vector3(0, 18, -40).applyQuaternion(shipRef.current.quaternion);
@@ -220,9 +232,16 @@ function Player({ enemies, onHit }: PlayerProps) {
             <ShipModel />
             <PerspectiveCamera makeDefault position={[0, 15, -30]} />
         </group>
-        {projectiles.map(p => (
-            <Projectile key={p.id} position={p.pos} velocity={p.vel} />
-        ))}
+        {activeProjectileIds.map(id => {
+            const p = projectilesRef.current.find(proj => proj.id === id);
+            if (!p) return null;
+            return (
+                <mesh key={id} ref={p.meshRef} position={p.pos} castShadow>
+                    <sphereGeometry args={[0.4, 8, 8]} />
+                    <meshStandardMaterial color="#222" metalness={1} roughness={0.2} />
+                </mesh>
+            );
+        })}
     </group>
   );
 }
@@ -236,7 +255,6 @@ function Enemy({ position, dead }: { position: [number, number, number]; dead: b
         ref.current.position.y = getWaveHeight(ref.current.position.x, ref.current.position.z, time) - 0.5;
         ref.current.rotation.y += 0.005;
 
-        // Dynamic tilt for enemy
         const h = getWaveHeight(ref.current.position.x, ref.current.position.z, time);
         const hNext = getWaveHeight(ref.current.position.x, ref.current.position.z + 1, time);
         ref.current.rotation.x = (h - hNext) * 0.4;
