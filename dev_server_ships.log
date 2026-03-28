@@ -1,0 +1,16 @@
+
+> polutek@0.1.0 dev
+> next dev
+
+  ▲ Next.js 14.2.35
+  - Local:        http://localhost:3000
+
+ ✓ Starting...
+ ✓ Ready in 4.3s
+ ○ Compiling / ...
+ ✓ Compiled / in 9.3s (1632 modules)
+ GET / 200 in 9710ms
+ ✓ Compiled in 814ms (1632 modules)
+ GET / 200 in 133ms
+ ✓ Compiled in 2.6s (1632 modules)
+ GET / 200 in 310ms
