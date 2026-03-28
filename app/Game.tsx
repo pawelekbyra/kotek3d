@@ -4,7 +4,7 @@ import React, { Suspense, useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
   Sky, ContactShadows, Environment, useGLTF, useAnimations, Float,
-  Instances, Instance, Loader, useProgress, Stars, Sparkles, Cloud
+  Instances, Instance, Loader, useProgress, Stars, Sparkles, Cloud, OrbitControls
 } from '@react-three/drei';
 import * as THREE from 'three';
 import { createNoise2D } from 'simplex-noise';
@@ -151,10 +151,11 @@ function Duck({ id, pos, collected, onCollect }: any) {
   );
 }
 
-function Player({ gameStarted, obstacles, ducks, onCollect, onMove }: any) {
-  const group = useRef<THREE.Group>(null!);
+function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }: any) {
+  const group = playerRef;
   const { scene, animations } = useGLTF('/Cat.glb');
   const { actions } = useAnimations(animations, group);
+  const { camera } = useThree();
 
   const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false, run: false, jump: false });
   const movementRef = useRef(movement);
@@ -219,17 +220,33 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove }: any) {
     if (!group.current || !gameStarted) return;
 
     const baseSpeed = movementRef.current.run ? 18 : 8;
-    const rotateSpeed = 3.5 * delta;
 
-    if (movementRef.current.left) group.current.rotation.y += rotateSpeed;
-    if (movementRef.current.right) group.current.rotation.y -= rotateSpeed;
+    // Camera-relative movement
+    const moveDir = new THREE.Vector3();
+    const cameraDirection = new THREE.Vector3();
+    camera.getWorldDirection(cameraDirection);
+    cameraDirection.y = 0;
+    cameraDirection.normalize();
 
-    const moveDirection = new THREE.Vector3(0, 0, 0);
-    if (movementRef.current.forward) moveDirection.z += 1;
-    if (movementRef.current.backward) moveDirection.z -= 1;
-    moveDirection.applyQuaternion(group.current.quaternion);
-    moveDirection.normalize().multiplyScalar(baseSpeed);
+    const cameraRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), cameraDirection).negate();
 
+    if (movementRef.current.forward) moveDir.add(cameraDirection);
+    if (movementRef.current.backward) moveDir.sub(cameraDirection);
+    if (movementRef.current.left) moveDir.sub(cameraRight);
+    if (movementRef.current.right) moveDir.add(cameraRight);
+
+    moveDir.normalize();
+
+    if (moveDir.length() > 0) {
+      // Face the direction of movement
+      const targetAngle = Math.atan2(moveDir.x, moveDir.z);
+      let diff = targetAngle - group.current.rotation.y;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      group.current.rotation.y += diff * 0.15;
+    }
+
+    const moveDirection = moveDir.clone().multiplyScalar(baseSpeed);
     const nextX = group.current.position.x + moveDirection.x * delta;
     const nextZ = group.current.position.z + moveDirection.z * delta;
 
@@ -309,11 +326,6 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove }: any) {
       isGrounded.current = true;
     }
 
-    // Camera follow
-    const relativeCameraOffset = new THREE.Vector3(0, 6, -12);
-    const cameraOffset = relativeCameraOffset.applyMatrix4(group.current.matrixWorld);
-    state.camera.position.lerp(cameraOffset, 0.1);
-    state.camera.lookAt(group.current.position.x, group.current.position.y + 2, group.current.position.z);
   });
 
   return (
@@ -324,6 +336,28 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove }: any) {
 }
 
 // --- UI Components ---
+
+function CameraController({ playerRef }: { playerRef: React.RefObject<THREE.Group> }) {
+  const { camera, controls } = useThree() as any;
+
+  useFrame(() => {
+    if (playerRef.current && controls) {
+      const { x, y, z } = playerRef.current.position;
+      controls.target.set(x, y + 2, z);
+      controls.update();
+    }
+  });
+
+  return (
+    <OrbitControls
+      makeDefault
+      enablePan={false}
+      minDistance={5}
+      maxDistance={30}
+      maxPolarAngle={Math.PI / 2.1}
+    />
+  );
+}
 
 function StartScreen({ onStart }: any) {
   return (
@@ -345,6 +379,7 @@ function StartScreen({ onStart }: any) {
 // --- Main Game ---
 
 export default function Game() {
+  const playerRef = useRef<THREE.Group>(null!);
   const [gameStarted, setGameStarted] = useState(false);
   const [score, setScore] = useState(0);
   const [distance, setDistance] = useState(0);
@@ -407,7 +442,10 @@ export default function Game() {
           <ContactShadows resolution={1024} scale={MAP_SIZE} blur={2} opacity={0.2} far={100} color="#000" />
           <Environment preset="forest" />
 
+          <CameraController playerRef={playerRef} />
+
           <Player
+            playerRef={playerRef}
             gameStarted={gameStarted}
             obstacles={envData}
             ducks={ducks}
