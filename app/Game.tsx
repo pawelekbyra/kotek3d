@@ -207,7 +207,10 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove }: any) {
 
     if (currentAction !== action && actions[action]) {
       actions[currentAction]?.fadeOut(0.2);
-      actions[action].reset().fadeIn(0.2).play();
+      const nextAction = actions[action];
+      if (nextAction) {
+        nextAction.reset().fadeIn(0.2).play();
+      }
       setCurrentAction(action);
     }
   }, [movement, actions, currentAction]);
