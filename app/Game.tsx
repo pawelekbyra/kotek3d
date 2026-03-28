@@ -1,153 +1,112 @@
 'use client';
 
-import React, { Suspense, useState, useEffect, useRef, useMemo } from 'react';
+import React, { Suspense, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
-  Sky, ContactShadows, Environment, useGLTF, useAnimations, Float,
-  Instances, Instance, Loader, useProgress, Stars, Sparkles, Cloud, OrbitControls
+  Sky, Environment, useGLTF, useAnimations, OrbitControls, useProgress, Float, ContactShadows,
 } from '@react-three/drei';
 import * as THREE from 'three';
-import { createNoise2D } from 'simplex-noise';
 
-// --- Constants & Config ---
-const MAP_SIZE = 600;
-const NOISE_SCALE = 0.015;
-const NOISE_STRENGTH = 8;
+// --- Global state for cannonballs to avoid React state lag in useFrame ---
+const cannonballs: any[] = [];
 
-// --- Utilities ---
-const noise2D = createNoise2D();
+// --- Cannonball Component ---
 
-function getTerrainHeight(x: number, z: number) {
-  // Now flat as requested
-  return 0;
-}
+function Cannonball({ id, position, direction, onRemove }: any) {
+  const ref = useRef<THREE.Mesh>(null!);
+  const speed = 150;
+  const gravity = 15;
+  const velocity = useRef(direction.clone().multiplyScalar(speed));
+  const life = useRef(4); // 4 seconds life
+  const initialPos = useMemo(() => position.clone(), [position]);
 
-// --- Level Components ---
+  useFrame((state, delta) => {
+    if (!ref.current) return;
 
-function Meadow() {
+    velocity.current.y -= gravity * delta;
+    ref.current.position.add(velocity.current.clone().multiplyScalar(delta));
+
+    // Update global state for collision detection
+    const index = cannonballs.findIndex(cb => cb.id === id);
+    if (index !== -1) {
+        cannonballs[index].pos.copy(ref.current.position);
+    }
+
+    life.current -= delta;
+    if (life.current <= 0 || ref.current.position.y < -10) {
+      const idx = cannonballs.findIndex(cb => cb.id === id);
+      if (idx !== -1) cannonballs.splice(idx, 1);
+      onRemove(id);
+    }
+  });
+
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-      <planeGeometry args={[MAP_SIZE, MAP_SIZE]} />
-      <meshStandardMaterial color="#2d5a27" roughness={0.8} />
+    <mesh ref={ref} position={initialPos} castShadow>
+      <sphereGeometry args={[0.7, 16, 16]} />
+      <meshStandardMaterial color="#111" roughness={0.05} metalness={0.95} />
     </mesh>
   );
 }
 
-function RunningTrack() {
-  const curve = useMemo(() => {
-    const points = [];
-    const radius = 100;
-    for (let i = 0; i <= 100; i++) {
-      const angle = (i / 100) * Math.PI * 4;
-      const r = radius + Math.sin(angle * 0.5) * 40;
-      const x = Math.cos(angle) * r;
-      const z = Math.sin(angle) * r;
-      points.push(new THREE.Vector3(x, 0.1, z));
-    }
-    return new THREE.CatmullRomCurve3(points);
-  }, []);
+// --- Enemy Logic ---
 
-  const trackGeo = useMemo(() => new THREE.TubeGeometry(curve, 300, 3, 8, false), [curve]);
-
-  return (
-    <mesh geometry={trackGeo} receiveShadow>
-      <meshStandardMaterial color="#444" roughness={1} />
-    </mesh>
-  );
-}
-
-function TreeInstance({ positions }: any) {
-  return (
-    <group>
-      {positions.map((p: any, i: number) => (
-        <Float key={i} speed={0.5} rotationIntensity={0.1} floatIntensity={0.1}>
-          <group position={p} rotation={[0, Math.random() * Math.PI, 0]} scale={2 + Math.random()}>
-            <mesh position={[0, 2, 0]} castShadow>
-              <coneGeometry args={[1.5, 4, 8]} />
-              <meshStandardMaterial color="#1a4d1a" />
-            </mesh>
-            <mesh position={[0, 0, 0]} castShadow>
-              <cylinderGeometry args={[0.3, 0.4, 1, 8]} />
-              <meshStandardMaterial color="#4d2600" />
-            </mesh>
-          </group>
-        </Float>
-      ))}
-    </group>
-  );
-}
-
-function BushInstance({ positions }: any) {
-  return (
-    <group>
-      {positions.map((p: any, i: number) => (
-        <group key={i} position={p} rotation={[0, Math.random() * Math.PI, 0]} scale={0.8 + Math.random() * 0.5}>
-          <mesh castShadow>
-            <sphereGeometry args={[1, 8, 8]} />
-            <meshStandardMaterial color="#2d5a27" />
-          </mesh>
-        </group>
-      ))}
-    </group>
-  );
-}
-
-function Bird({ url, position, speed = 1, radius = 5, height = 2 }: any) {
-  const { scene, animations } = useGLTF(url) as any;
-  const { actions } = useAnimations(animations, scene);
+function EnemyShip({ id, initialPos, playerRef, onHit }: any) {
+  const { scene } = useGLTF('/ship.glb') as any;
   const ref = useRef<THREE.Group>(null!);
+  const [destroyed, setDestroyed] = useState(false);
+  const pos = useMemo(() => new THREE.Vector3(...initialPos), [initialPos]);
 
-  useEffect(() => {
-    if (actions && actions[Object.keys(actions)[0]]) {
-      actions[Object.keys(actions)[0]]?.play();
+  useFrame((state, delta) => {
+    if (destroyed || !ref.current) return;
+
+    // Check collision with cannonballs
+    for (let i = 0; i < cannonballs.length; i++) {
+        const cb = cannonballs[i];
+        const dist = ref.current.position.distanceTo(cb.pos);
+        if (dist < 12) { // Ship collision radius
+            setDestroyed(true);
+            onHit();
+            // Remove cannonball from global state and trigger its removal
+            cannonballs.splice(i, 1);
+            break;
+        }
     }
-  }, [actions]);
 
-  useFrame((state) => {
-    const t = state.clock.getElapsedTime() * speed;
-    ref.current.position.x = position[0] + Math.cos(t) * radius;
-    ref.current.position.z = position[2] + Math.sin(t) * radius;
-    ref.current.position.y = position[1] + Math.sin(t * 0.5) * height;
-    ref.current.rotation.y = -t + Math.PI / 2;
+    if (destroyed) return;
+
+    // AI: rotate towards player
+    if (playerRef.current) {
+      const direction = new THREE.Vector3().subVectors(playerRef.current.position, ref.current.position);
+      const angle = Math.atan2(direction.x, direction.z);
+      ref.current.rotation.y = THREE.MathUtils.lerp(ref.current.rotation.y, angle, 0.2 * delta);
+    }
+
+    // Ship "bobbing" effect
+    ref.current.position.y = Math.sin(state.clock.getElapsedTime() * 1.5 + pos.x) * 0.3;
+    ref.current.rotation.x = Math.sin(state.clock.getElapsedTime() * 1.2 + pos.z) * 0.05;
+    ref.current.rotation.z = Math.sin(state.clock.getElapsedTime() * 0.8 + pos.x) * 0.05;
   });
 
-  return (
-    <group ref={ref} scale={0.01}>
-      <primitive object={scene} />
-    </group>
-  );
-}
-
-// --- Player & Physics ---
-
-function Duck({ id, pos, collected, onCollect }: any) {
-  const { scene } = useGLTF('/Duck.glb');
-  const ref = useRef<THREE.Group>(null!);
-
-  useFrame((state) => {
-    if (collected || !ref.current) return;
-    ref.current.rotation.y += 0.02;
-    ref.current.position.y = pos[1] + Math.sin(state.clock.getElapsedTime() * 2) * 0.2;
-  });
-
-  if (collected) return null;
+  if (destroyed) return null;
 
   return (
-    <group ref={ref} position={pos} scale={1.5}>
+    <group ref={ref} position={pos} scale={4} rotation={[0, Math.random() * Math.PI, 0]}>
       <primitive object={scene.clone()} />
     </group>
   );
 }
 
-function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }: any) {
-  const group = playerRef;
-  const { scene, animations } = useGLTF('/Cat.glb');
-  const { actions } = useAnimations(animations, group);
-  const { camera } = useThree();
+// --- Player Ship Logic ---
 
-  const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false, run: false, jump: false });
+function Ship({ playerRef, gameStarted, onFire }: any) {
+  const { scene } = useGLTF('/ship.glb') as any;
+  const ref = playerRef;
+  const [movement, setMovement] = useState({ forward: false, backward: false, left: false, right: false });
   const movementRef = useRef(movement);
   useEffect(() => { movementRef.current = movement; }, [movement]);
+
+  const velocity = useRef(0);
+  const rotationVelocity = useRef(0);
 
   useEffect(() => {
     if (!gameStarted) return;
@@ -157,8 +116,7 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }:
         case 's': setMovement(m => ({ ...m, backward: true })); break;
         case 'a': setMovement(m => ({ ...m, left: true })); break;
         case 'd': setMovement(m => ({ ...m, right: true })); break;
-        case 'shift': setMovement(m => ({ ...m, run: true })); break;
-        case ' ': setMovement(m => ({ ...m, jump: true })); break;
+        case ' ': onFire(); break;
       }
     };
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -167,171 +125,85 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }:
         case 's': setMovement(m => ({ ...m, backward: false })); break;
         case 'a': setMovement(m => ({ ...m, left: false })); break;
         case 'd': setMovement(m => ({ ...m, right: false })); break;
-        case 'shift': setMovement(m => ({ ...m, run: false })); break;
-        case ' ': setMovement(m => ({ ...m, jump: false })); break;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [gameStarted]);
-
-  const [currentAction, setCurrentAction] = useState('Idle');
-  const velocity = useRef(new THREE.Vector3(0, 0, 0));
-  const isGrounded = useRef(true);
-
-  useEffect(() => {
-    if (!actions) return;
-    let action = 'Idle';
-    const isMoving = movement.forward || movement.backward || movement.left || movement.right;
-    if (!isGrounded.current) action = 'Jump';
-    else if (isMoving) action = movement.run ? 'Run' : 'Walk';
-
-    if (!actions[action]) {
-        if (action === 'Run' && actions['Running']) action = 'Running';
-        else if (action === 'Walk' && actions['Walking']) action = 'Walking';
-        else if (action === 'Jump' && actions['WalkJump']) action = 'WalkJump';
-        else action = Object.keys(actions)[0];
-    }
-
-    if (currentAction !== action && actions[action]) {
-      actions[currentAction]?.fadeOut(0.2);
-      const nextAction = actions[action];
-      if (nextAction) {
-        nextAction.reset().fadeIn(0.2).play();
-      }
-      setCurrentAction(action);
-    }
-  }, [movement, actions, currentAction]);
+  }, [gameStarted, onFire]);
 
   useFrame((state, delta) => {
-    if (!group.current || !gameStarted) return;
+    if (!ref.current || !gameStarted) return;
 
-    const baseSpeed = movementRef.current.run ? 55 : 22;
+    // Movement with inertia
+    const accel = 30.0;
+    const drag = 1.0;
+    const maxSpeed = 50.0;
+    const turnSpeed = 2.0;
 
-    // Camera-relative movement
-    const moveDir = new THREE.Vector3();
-    const cameraDirection = new THREE.Vector3();
-    camera.getWorldDirection(cameraDirection);
-    cameraDirection.y = 0;
-    cameraDirection.normalize();
+    if (movementRef.current.forward) velocity.current += accel * delta;
+    if (movementRef.current.backward) velocity.current -= accel * delta;
 
-    const cameraRight = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), cameraDirection).negate();
+    velocity.current = Math.max(-maxSpeed/2, Math.min(maxSpeed, velocity.current));
+    velocity.current -= velocity.current * drag * delta;
 
-    if (movementRef.current.forward) moveDir.add(cameraDirection);
-    if (movementRef.current.backward) moveDir.sub(cameraDirection);
-    if (movementRef.current.left) moveDir.sub(cameraRight);
-    if (movementRef.current.right) moveDir.add(cameraRight);
+    if (movementRef.current.left) rotationVelocity.current += turnSpeed * delta;
+    if (movementRef.current.right) rotationVelocity.current -= turnSpeed * delta;
 
-    moveDir.normalize();
+    rotationVelocity.current -= rotationVelocity.current * 4.0 * delta;
 
-    if (moveDir.length() > 0) {
-      // Face the direction of movement
-      const targetAngle = Math.atan2(moveDir.x, moveDir.z);
-      let diff = targetAngle - group.current.rotation.y;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      group.current.rotation.y += diff * 0.7;
-    }
+    ref.current.rotation.y += rotationVelocity.current;
 
-    const moveDirection = moveDir.clone().multiplyScalar(baseSpeed);
-    const nextX = group.current.position.x + moveDirection.x * delta;
-    const nextZ = group.current.position.z + moveDirection.z * delta;
+    const moveDirection = new THREE.Vector3(0, 0, 1).applyQuaternion(ref.current.quaternion);
+    ref.current.position.add(moveDirection.multiplyScalar(velocity.current * delta));
 
-    // Simple Collision Detection
-    let collision = false;
-    const playerRadius = 1.2;
-
-    // Check trees
-    for (const tree of obstacles.trees) {
-      const dx = nextX - tree[0];
-      const dz = nextZ - tree[2];
-      const distSq = dx * dx + dz * dz;
-      if (distSq < Math.pow(playerRadius + 2, 2)) { // Tree radius ~2
-        collision = true;
-        break;
-      }
-    }
-
-    // Check bushes
-    if (!collision) {
-      for (const bush of obstacles.bushes) {
-        const dx = nextX - bush[0];
-        const dz = nextZ - bush[2];
-        const distSq = dx * dx + dz * dz;
-        if (distSq < Math.pow(playerRadius + 0.8, 2)) {
-          collision = true;
-          break;
-        }
-      }
-    }
-
-    if (!collision) {
-      const movedDist = Math.sqrt(Math.pow(nextX - group.current.position.x, 2) + Math.pow(nextZ - group.current.position.z, 2));
-      group.current.position.x = nextX;
-      group.current.position.z = nextZ;
-      if (movedDist > 0.01) onMove(movedDist);
-    } else {
-        // Sliding physics: try moving only X or only Z
-        const canMoveX = !obstacles.trees.some((t: any) => Math.pow(nextX - t[0], 2) + Math.pow(group.current.position.z - t[2], 2) < Math.pow(playerRadius + 2, 2)) &&
-                         !obstacles.bushes.some((b: any) => Math.pow(nextX - b[0], 2) + Math.pow(group.current.position.z - b[2], 2) < Math.pow(playerRadius + 0.8, 2));
-
-        const canMoveZ = !obstacles.trees.some((t: any) => Math.pow(group.current.position.x - t[0], 2) + Math.pow(nextZ - t[2], 2) < Math.pow(playerRadius + 2, 2)) &&
-                         !obstacles.bushes.some((b: any) => Math.pow(group.current.position.x - b[0], 2) + Math.pow(nextZ - b[2], 2) < Math.pow(playerRadius + 0.8, 2));
-
-        if (canMoveX) {
-            group.current.position.x = nextX;
-            onMove(Math.abs(moveDirection.x * delta));
-        } else if (canMoveZ) {
-            group.current.position.z = nextZ;
-            onMove(Math.abs(moveDirection.z * delta));
-        }
-    }
-
-    // Duck Collection Detection
-    for (const duck of ducks) {
-      if (!duck.collected) {
-        const dx = group.current.position.x - duck.pos[0];
-        const dz = group.current.position.z - duck.pos[2];
-        const distSq = dx * dx + dz * dz;
-        if (distSq < 4) { // Collection radius
-          onCollect(duck.id);
-        }
-      }
-    }
-
-    const terrainH = getTerrainHeight(group.current.position.x, group.current.position.z);
-    if (movementRef.current.jump && isGrounded.current) {
-      velocity.current.y = 14;
-      isGrounded.current = false;
-    }
-    velocity.current.y -= 35 * delta;
-    group.current.position.y += velocity.current.y * delta;
-
-    if (group.current.position.y <= terrainH) {
-      group.current.position.y = terrainH;
-      velocity.current.y = 0;
-      isGrounded.current = true;
-    }
-
+    // Ship "bobbing" effect
+    ref.current.position.y = Math.sin(state.clock.getElapsedTime() * 1.5) * 0.3;
+    ref.current.rotation.x = Math.sin(state.clock.getElapsedTime() * 1.2) * 0.05;
+    ref.current.rotation.z = Math.sin(state.clock.getElapsedTime() * 0.8) * 0.05 + rotationVelocity.current * 0.5;
   });
 
   return (
-    <group ref={group} scale={0.025} rotation={[0, Math.PI, 0]} castShadow>
+    <group ref={ref} scale={4} castShadow>
       <primitive object={scene} />
     </group>
   );
 }
 
-// --- UI Components ---
+// --- Sea Environment ---
 
-function CameraController({ playerRef }: { playerRef: React.RefObject<THREE.Group> }) {
-  const { camera, controls } = useThree() as any;
+function Ocean() {
+  const meshRef = useRef<THREE.Mesh>(null!);
+
+  useFrame((state) => {
+    if (meshRef.current) {
+      meshRef.current.position.y = -1 + Math.sin(state.clock.getElapsedTime() * 0.5) * 0.1;
+    }
+  });
+
+  return (
+    <mesh ref={meshRef} rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, -1, 0]}>
+      <planeGeometry args={[4000, 4000, 100, 100]} />
+      <meshStandardMaterial
+        color="#003366"
+        roughness={0.02}
+        metalness={0.3}
+        transparent
+        opacity={0.85}
+      />
+    </mesh>
+  );
+}
+
+// --- Main Game ---
+
+function CameraController({ playerRef }: any) {
+  const { controls } = useThree() as any;
 
   useFrame(() => {
     if (playerRef.current && controls) {
       const { x, y, z } = playerRef.current.position;
-      controls.target.set(x, y + 2, z);
+      controls.target.lerp(new THREE.Vector3(x, y + 5, z), 0.1);
       controls.update();
     }
   });
@@ -339,146 +211,161 @@ function CameraController({ playerRef }: { playerRef: React.RefObject<THREE.Grou
   return (
     <OrbitControls
       makeDefault
-      enablePan={false}
-      minDistance={5}
-      maxDistance={40}
-      maxPolarAngle={Math.PI / 2.1}
-      rotateSpeed={1.2}
+      maxPolarAngle={Math.PI / 2.2}
+      minDistance={50}
+      maxDistance={300}
     />
   );
 }
-
-function StartScreen({ onStart }: any) {
-  return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/80 backdrop-blur-2xl">
-      <div className="text-center">
-        <h1 className="text-[10vw] font-black italic tracking-tighter text-white mb-2 leading-none">KOTEK 3D</h1>
-        <p className="text-green-500 font-bold tracking-[0.5em] uppercase mb-12">Symulator Biegania</p>
-        <button
-          onClick={onStart}
-          className="group px-16 py-8 bg-green-500 hover:bg-white text-black font-black text-3xl rounded-full transition-all hover:scale-105 active:scale-95 shadow-[0_0_50px_rgba(34,197,94,0.3)]"
-        >
-          START BIEGU
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// --- Main Game ---
 
 export default function Game() {
   const playerRef = useRef<THREE.Group>(null!);
   const [gameStarted, setGameStarted] = useState(false);
   const [score, setScore] = useState(0);
-  const [distance, setDistance] = useState(0);
   const { progress } = useProgress();
 
-  const envData = useMemo(() => {
-    const trees = [], bushes = [], ducks = [];
-    for (let i = 0; i < 250; i++) {
-        const x = (Math.random() - 0.5) * 550, z = (Math.random() - 0.5) * 550;
-        trees.push([x, 0, z]);
+  const [activeCannonballs, setActiveCannonballs] = useState<any[]>([]);
+
+  const enemiesData = useMemo(() => {
+    const data = [];
+    for (let i = 0; i < 30; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const radius = 250 + Math.random() * 450;
+        data.push({
+            id: i,
+            initialPos: [Math.cos(angle) * radius, 0, Math.sin(angle) * radius]
+        });
     }
-    for (let i = 0; i < 400; i++) {
-        const x = (Math.random() - 0.5) * 580, z = (Math.random() - 0.5) * 580;
-        bushes.push([x, 0, z]);
-    }
-    for (let i = 0; i < 50; i++) {
-        const x = (Math.random() - 0.5) * 500, z = (Math.random() - 0.5) * 500;
-        ducks.push({ id: i, pos: [x, 0.5, z], collected: false });
-    }
-    return { trees, bushes, ducks };
+    return data;
   }, []);
 
-  const [ducks, setDucks] = useState(envData.ducks);
+  const handleFire = useCallback(() => {
+    if (!playerRef.current) return;
+    const id = Date.now() + Math.random();
+    const position = playerRef.current.position.clone();
+    position.y += 6;
+    const direction = new THREE.Vector3(0, 0, 1).applyQuaternion(playerRef.current.quaternion);
+
+    // Add to global state for physics/collision
+    cannonballs.push({ id, pos: position.clone() });
+
+    // Add to React state for rendering
+    setActiveCannonballs(prev => [...prev, { id, position, direction }]);
+  }, []);
+
+  const removeCannonball = useCallback((id: number) => {
+    setActiveCannonballs(prev => prev.filter(cb => cb.id !== id));
+  }, []);
 
   return (
-    <div className="w-screen h-screen bg-sky-400 relative overflow-hidden">
-      {!gameStarted && progress === 100 && <StartScreen onStart={() => setGameStarted(true)} />}
-
+    <div className="w-screen h-screen bg-zinc-950 relative overflow-hidden text-white font-sans selection:bg-blue-500/30">
       {progress < 100 && (
         <div className="absolute inset-0 z-[60] flex items-center justify-center bg-zinc-950">
           <div className="text-center">
-            <div className="w-48 h-1 bg-white/10 rounded-full mb-4">
-              <div className="h-full bg-green-500 transition-all" style={{ width: `${progress}%` }}></div>
+            <div className="w-64 h-1 bg-white/5 rounded-full mb-6 overflow-hidden">
+              <div className="h-full bg-blue-500 transition-all duration-300 shadow-[0_0_15px_rgba(59,130,246,0.5)]" style={{ width: `${progress}%` }}></div>
             </div>
-            <p className="text-white/20 text-[10px] uppercase tracking-widest">Generowanie świata...</p>
+            <p className="text-blue-500/50 text-[10px] uppercase font-black tracking-[0.5em] animate-pulse">Inicjalizacja Systemów Morskich</p>
           </div>
         </div>
       )}
 
-      <Canvas shadows camera={{ position: [0, 15, 25], fov: 45 }}>
+      {!gameStarted && progress === 100 && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-zinc-950/20 backdrop-blur-sm">
+          <div className="text-center p-20 bg-zinc-950/40 rounded-[5rem] border border-white/5 shadow-[0_0_100px_rgba(0,0,0,0.5)]">
+            <h1 className="text-[12vw] font-black tracking-tighter italic mb-4 drop-shadow-2xl leading-none select-none">STATKI 3D</h1>
+            <p className="text-blue-500 font-bold tracking-[0.8em] uppercase mb-16 text-sm opacity-60">Bitwa o Panowanie na Oceanie</p>
+            <button
+              onClick={() => setGameStarted(true)}
+              className="px-20 py-10 bg-blue-600 hover:bg-white hover:text-blue-900 font-black text-4xl rounded-full transition-all transform hover:scale-110 active:scale-95 shadow-[0_0_80px_rgba(37,99,235,0.5)] ring-1 ring-white/10"
+            >
+              ROZPOCZNIJ BITWĘ
+            </button>
+          </div>
+        </div>
+      )}
+
+      <Canvas shadows camera={{ position: [0, 80, 150], fov: 45 }}>
         <Suspense fallback={null}>
-          <Sky distance={450000} sunPosition={[100, 20, 100]} turbidity={0.1} rayleigh={2} />
-          <Cloud position={[-100, 50, -100]} speed={0.2} opacity={0.5} />
-          <Cloud position={[100, 60, 100]} speed={0.1} opacity={0.5} />
-          <Cloud position={[0, 40, -200]} speed={0.15} opacity={0.5} />
+          <Sky distance={450000} sunPosition={[10, 5, 10]} turbidity={0.05} rayleigh={1} />
+          <fog attach="fog" args={['#050510', 100, 1200]} />
 
-          <Sparkles count={500} scale={MAP_SIZE} size={2} speed={0.5} opacity={0.2} color="#fff" />
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[100, 200, 100]} intensity={2.5} castShadow shadow-mapSize={[2048, 2048]} shadow-camera-left={-300} shadow-camera-right={300} shadow-camera-top={300} shadow-camera-bottom={-300} />
-
-          <Meadow />
-          <RunningTrack />
-
-          <TreeInstance positions={envData.trees} />
-          <BushInstance positions={envData.bushes} />
-
-          <Bird url="/Flamingo.glb" position={[100, 40, 0]} speed={0.3} radius={100} height={20} />
-          <Bird url="/Stork.glb" position={[-100, 50, -50]} speed={0.2} radius={120} height={25} />
-
-          <ContactShadows resolution={1024} scale={MAP_SIZE} blur={2} opacity={0.2} far={100} color="#000" />
-          <Environment preset="forest" />
-
-          <CameraController playerRef={playerRef} />
-
-          <Player
-            playerRef={playerRef}
-            gameStarted={gameStarted}
-            obstacles={envData}
-            ducks={ducks}
-            onCollect={(id: number) => {
-              setDucks(ds => ds.map(d => d.id === id ? { ...d, collected: true } : d));
-              setScore(s => s + 1);
-            }}
-            onMove={(d: number) => setDistance(prev => prev + d)}
+          <ambientLight intensity={0.2} />
+          <directionalLight
+            position={[100, 300, 100]}
+            intensity={2}
+            castShadow
+            shadow-mapSize={[4096, 4096]}
+            shadow-camera-left={-600}
+            shadow-camera-right={600}
+            shadow-camera-top={600}
+            shadow-camera-bottom={-600}
           />
 
-          {ducks.map((duck: any) => (
-            <Duck
-              key={duck.id}
-              {...duck}
-              onCollect={(id: number) => {
-                setDucks(ds => ds.map(d => d.id === id ? { ...d, collected: true } : d));
-                setScore(s => s + 1);
-              }}
+          <Ocean />
+
+          <Ship
+            playerRef={playerRef}
+            gameStarted={gameStarted}
+            onFire={handleFire}
+          />
+
+          {enemiesData.map((e) => (
+            <EnemyShip
+                key={e.id}
+                id={e.id}
+                initialPos={e.initialPos}
+                playerRef={playerRef}
+                onHit={() => setScore(s => s + 1)}
             />
           ))}
+
+          {activeCannonballs.map((cb) => (
+            <Cannonball
+                key={cb.id}
+                {...cb}
+                onRemove={removeCannonball}
+            />
+          ))}
+
+          <CameraController playerRef={playerRef} />
+          <Environment preset="night" />
         </Suspense>
       </Canvas>
 
       {gameStarted && (
-        <div className="absolute top-12 left-12 p-8 bg-black/60 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] pointer-events-none">
-          <p className="text-green-500 text-[10px] font-black uppercase tracking-[0.4em] mb-2">BIEG AKTYWNY</p>
-          <div className="flex items-center gap-4">
-            <div className="h-12 w-[2px] bg-white/20"></div>
-            <div>
-              <h2 className="text-4xl font-black text-white italic leading-none">KOTEK 3D</h2>
-              <p className="text-white/40 text-xs">SYMULATOR V2</p>
-            </div>
+        <div className="absolute top-16 left-16 p-12 bg-zinc-950/60 backdrop-blur-3xl border border-white/5 rounded-[4rem] pointer-events-none shadow-3xl">
+          <p className="text-blue-500 text-[10px] font-black uppercase tracking-[0.6em] mb-4 font-mono opacity-60">OPERACJA MORSKA TRWA</p>
+          <h2 className="text-6xl font-black italic leading-none tracking-tighter mb-12">STATKI 3D</h2>
+
+          <div className="flex flex-col gap-2">
+             <p className="text-[10px] text-white/20 uppercase font-black tracking-widest">WROGOSTKI ZATOPIONE</p>
+             <p className="text-[8rem] font-black text-blue-500 leading-none drop-shadow-2xl">{score}</p>
           </div>
 
-          <div className="mt-6 grid grid-cols-2 gap-4">
-            <div className="bg-white/5 p-4 rounded-2xl">
-              <p className="text-[10px] text-white/40 uppercase mb-1">DYSTANS</p>
-              <p className="text-2xl font-black text-white">{Math.floor(distance)}<span className="text-xs ml-1 opacity-40">m</span></p>
+          <div className="mt-16 pt-12 border-t border-white/5 grid grid-cols-2 gap-12 text-[10px] text-white/40 uppercase tracking-[0.3em] font-black">
+            <div className="flex flex-col gap-3">
+                <p className="text-blue-500 opacity-50">MANEWRY</p>
+                <div className="flex gap-4">
+                   <span className="px-3 py-1 bg-white/5 rounded-lg border border-white/5">[W][A][S][D]</span>
+                </div>
             </div>
-            <div className="bg-green-500 p-4 rounded-2xl shadow-[0_10px_30px_rgba(34,197,94,0.3)]">
-              <p className="text-[10px] text-black/40 uppercase mb-1 font-bold">KACZKI</p>
-              <p className="text-2xl font-black text-black">{score}</p>
+            <div className="flex flex-col gap-3">
+                <p className="text-blue-500 opacity-50">SALWA</p>
+                <div className="flex gap-4">
+                   <span className="px-3 py-1 bg-white/5 rounded-lg border border-white/5">[SPACJA]</span>
+                </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Crosshair */}
+      {gameStarted && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div className="w-12 h-12 border-2 border-white/5 rounded-full flex items-center justify-center">
+                <div className="w-1 h-1 bg-blue-500 rounded-full animate-pulse"></div>
+            </div>
         </div>
       )}
     </div>
