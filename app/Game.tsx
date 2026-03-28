@@ -18,28 +18,16 @@ const NOISE_STRENGTH = 8;
 const noise2D = createNoise2D();
 
 function getTerrainHeight(x: number, z: number) {
-  // Smooth rolling hills
-  return noise2D(x * NOISE_SCALE, z * NOISE_SCALE) * NOISE_STRENGTH;
+  // Now flat as requested
+  return 0;
 }
 
 // --- Level Components ---
 
 function Meadow() {
-  const { geometry } = useMemo(() => {
-    const geo = new THREE.PlaneGeometry(MAP_SIZE, MAP_SIZE, 128, 128);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const z = pos.getZ(i);
-      pos.setY(i, getTerrainHeight(x, z));
-    }
-    geo.computeVertexNormals();
-    return { geometry: geo };
-  }, []);
-
   return (
-    <mesh geometry={geometry} receiveShadow>
+    <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+      <planeGeometry args={[MAP_SIZE, MAP_SIZE]} />
       <meshStandardMaterial color="#2d5a27" roughness={0.8} />
     </mesh>
   );
@@ -54,7 +42,7 @@ function RunningTrack() {
       const r = radius + Math.sin(angle * 0.5) * 40;
       const x = Math.cos(angle) * r;
       const z = Math.sin(angle) * r;
-      points.push(new THREE.Vector3(x, getTerrainHeight(x, z) + 0.1, z));
+      points.push(new THREE.Vector3(x, 0.1, z));
     }
     return new THREE.CatmullRomCurve3(points);
   }, []);
@@ -219,7 +207,7 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }:
   useFrame((state, delta) => {
     if (!group.current || !gameStarted) return;
 
-    const baseSpeed = movementRef.current.run ? 18 : 8;
+    const baseSpeed = movementRef.current.run ? 55 : 22;
 
     // Camera-relative movement
     const moveDir = new THREE.Vector3();
@@ -243,7 +231,7 @@ function Player({ gameStarted, obstacles, ducks, onCollect, onMove, playerRef }:
       let diff = targetAngle - group.current.rotation.y;
       while (diff < -Math.PI) diff += Math.PI * 2;
       while (diff > Math.PI) diff -= Math.PI * 2;
-      group.current.rotation.y += diff * 0.15;
+      group.current.rotation.y += diff * 0.7;
     }
 
     const moveDirection = moveDir.clone().multiplyScalar(baseSpeed);
@@ -353,8 +341,9 @@ function CameraController({ playerRef }: { playerRef: React.RefObject<THREE.Grou
       makeDefault
       enablePan={false}
       minDistance={5}
-      maxDistance={30}
+      maxDistance={40}
       maxPolarAngle={Math.PI / 2.1}
+      rotateSpeed={1.2}
     />
   );
 }
@@ -389,15 +378,15 @@ export default function Game() {
     const trees = [], bushes = [], ducks = [];
     for (let i = 0; i < 250; i++) {
         const x = (Math.random() - 0.5) * 550, z = (Math.random() - 0.5) * 550;
-        trees.push([x, getTerrainHeight(x, z), z]);
+        trees.push([x, 0, z]);
     }
     for (let i = 0; i < 400; i++) {
         const x = (Math.random() - 0.5) * 580, z = (Math.random() - 0.5) * 580;
-        bushes.push([x, getTerrainHeight(x, z), z]);
+        bushes.push([x, 0, z]);
     }
     for (let i = 0; i < 50; i++) {
         const x = (Math.random() - 0.5) * 500, z = (Math.random() - 0.5) * 500;
-        ducks.push({ id: i, pos: [x, getTerrainHeight(x, z) + 0.5, z], collected: false });
+        ducks.push({ id: i, pos: [x, 0.5, z], collected: false });
     }
     return { trees, bushes, ducks };
   }, []);
